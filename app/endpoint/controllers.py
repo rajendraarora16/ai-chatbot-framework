@@ -1,10 +1,8 @@
 # -*- coding: utf-8 -*-
 import copy
 import json
-
 from flask import Blueprint, request, abort
 from jinja2 import Template
-
 from flask import current_app as app
 from app.agents.models import Bot
 from app.commons import build_response
@@ -16,36 +14,64 @@ from app.intents.models import Intent
 from app.nlu.classifiers.sklearn_intent_classifer import \
     SklearnIntentClassifier
 from app.nlu.entity_extractor import EntityExtractor
-
 endpoint = Blueprint('api', __name__, url_prefix='/api')
-
 sentence_classifier = SklearnIntentClassifier()
 synonyms = None
 entity_extraction = None
 
-
-# Request Handler
 @endpoint.route('/v1', methods=['POST'])
 def api():
     """
-    Endpoint to converse with chatbot.
+    Endpoint to Converse with the Chatbot.
     Chat context is maintained by exchanging the payload between client and bot.
 
-    sample input/output payload =>
-
-    {
-      "currentNode": "",
-      "complete": false,
-      "parameters": [],
-      "extractedParameters": {},
-      "missingParameters": [],
-      "intent": {
-      },
-      "context": {},
-      "input": "hello",
-      "speechResponse": [
-      ]
-    }
+    ---
+    definitions:
+      currentNode:
+        type: string
+      complete:
+        type: boolean
+      context:
+        type: object
+        properties:
+      parameters:
+        type: array
+        items:
+          type: object
+          properties:
+            name:
+              type: string
+            type:
+              type: string
+            required:
+              type: boolean
+      extractedParameters:
+        type: object
+        properties:
+          country:
+            type: string
+      speechResponse:
+        type: array
+        items:
+          type: string
+      intent:
+        type: object
+        properties:
+          object_id:
+            type: string
+          confidence:
+            type: number
+          id:
+            type: string
+      input:
+        type: string
+      missingParameters:
+        type: array
+        items:
+      owner:
+        type: string
+      date:
+        type: string
 
     :param json:
     :return json:
@@ -57,37 +83,24 @@ def api():
     if request_json:
         context = {"context": request_json["context"]}
 
-        if app.config["DEFAULT_WELCOME_INTENT_NAME"] in request_json.get(
-                "input"):
-            intent = Intent.objects(
-                intentId=app.config["DEFAULT_WELCOME_INTENT_NAME"]).first()
-            result_json["complete"] = True
-            result_json["intent"]["object_id"] = str(intent.id)
-            result_json["intent"]["id"] = intent.intentId
-            result_json["input"] = request_json.get("input")
-            template = Template(
-                intent.speechResponse,
-                undefined=SilentUndefined)
-            result_json["speechResponse"] = split_sentence(template.render(**context))
-
-            app.logger.info(request_json.get("input"), extra=result_json)
-            return build_response.build_json(result_json)
-
         # check if input method is event or raw text
-        elif request_json.get("event"):
-            intent_id = request_json.get("event")
+        if request_json.get("input","").startswith("/"):
+            intent_id = request_json.get("input").split("/")[1]
             confidence = 1
-            result_json["event"]=None
         else:
             intent_id, confidence, suggestions = predict(request_json.get("input"))
+
         app.logger.info("intent_id => %s" % intent_id)
         intent = Intent.objects.get(intentId=intent_id)
 
+        # set intent as fallback intent
+        if intent is None:
+            intent = Intent.objects.get(intentId=app.config["DEFAULT_FALLBACK_INTENT_NAME"])
+
+        parameters = []
         if intent.parameters:
             parameters = intent.parameters
             result_json["extractedParameters"] = request_json.get("extractedParameters") or {}
-        else:
-            parameters = []
 
         if ((request_json.get("complete") is None) or (request_json.get("complete") is True)):
             result_json["intent"] = {
@@ -218,9 +231,7 @@ def update_model():
     global entity_extraction
 
     entity_extraction = EntityExtractor(synonyms)
-
     app.logger.info("Intent Model updated")
-
 
 def predict(sentence):
     """
@@ -233,8 +244,7 @@ def predict(sentence):
     app.logger.info("predicted intent %s", predicted)
     app.logger.info("other intents %s", intents)
     if predicted["confidence"] < bot.config.get("confidence_threshold", .90):
-        intents = Intent.objects(intentId=app.config["DEFAULT_FALLBACK_INTENT_NAME"])
-        intents = intents.first().intentId
-        return intents, 1.0, []
+        intent = Intent.objects.get(intentId=app.config["DEFAULT_FALLBACK_INTENT_NAME"])
+        return intent.intentId, 1.0, []
     else:
         return predicted["intent"], predicted["confidence"], intents[1:]

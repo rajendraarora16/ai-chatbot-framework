@@ -1,4 +1,4 @@
-FROM python:3.6-slim
+FROM python:3.9.6-slim
 
 # Install common libraries
 RUN apt-get update -qq \
@@ -9,10 +9,8 @@ WORKDIR /usr/src/app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-RUN python -m spacy download en_core_web_md; python
-
 EXPOSE 8080
 
 COPY . .
 
-CMD ["make","run_docker"]
+CMD ["gunicorn", "run:app" ,"--bind", "0.0.0.0:8080" ,"--access-logfile=logs/gunicorn-access.log" ,"--error-logfile" ,"logs/gunicorn-error.log"]
